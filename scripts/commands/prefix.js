@@ -1,56 +1,51 @@
-const chalk = require('chalk');
 const fs = require('fs');
 
 module.exports.config = {
-  name: "prefix",
-  aliases: [],
+  name: "بادئة",
+  aliases: ["prefix", "البادئة"],
   version: "1.0",
-  author: "Hridoy",
+  author: "سينكو",
   countDown: 5,
   adminOnly: false,
-  description: "Displays the bot's prefix, name, and admin name",
-  category: "Utility",
-  guide: "{pn} - Shows the bot's prefix, name, and admin name",
+  description: "عرض بادئة النظام وبادئة المجموعة الحالية",
+  category: "نظام",
+  guide: "{pn}",
   usePrefix: false 
 };
 
-module.exports.run = async function({ api, event }) {
+module.exports.run = async function({ api, event, config, threadsData }) {
   const { threadID, messageID } = event;
 
   try {
+    // تفاعل ساعة عند البدء
+    api.setMessageReaction("⏳", messageID, () => {}, true);
 
-    const botConfig = JSON.parse(fs.readFileSync('config.json', 'utf8'));
-
-    const botName = botConfig.botName || "Unknown Bot";
-    const prefix = botConfig.prefix || "!";
-    const adminNames = botConfig.adminName || "Unknown Admin";
-    const developer = botConfig.adminName || "Unknown Developer"; 
+    // جلب بادئة المجموعة من قاعدة البيانات (إذا كانت مخصصة) أو استخدام الافتراضية
+    const threadSettings = await threadsData.getFile(threadID) || {};
+    const threadPrefix = threadSettings.prefix || config.prefix;
+    const globalPrefix = config.prefix;
 
     const replyMsg = `
-╭──「 ${botName} CONFIG 」───
-│
-├ 🔹 Bot Name: ${botName}
-├ 🔹 Prefix: ${prefix}
-├ 🔹 Admin(s): ${adminNames}
-├ 🔹 Developer: ${developer}
-│
-╰───────────────────
-ℹ️ Type ${prefix}help to see all commands
-    `.trim();
+┌  ＮＯＢＡＲＡ • ＰＲＥＦＩＸ  ┐
+┕━━━━━━━━━━━━━━━━━━━━┙
 
-    await new Promise((resolve, reject) => {
-      api.sendMessage(replyMsg, threadID, (err) => {
-        if (err) {
-          console.log(chalk.red(`[Prefix Error] Failed to send message: ${err.message}`));
-          reject(err);
-        } else {
-          console.log(chalk.green(`[Prefix] Successfully sent bot info | ThreadID: ${threadID}`));
-          resolve();
-        }
-      }, messageID);
-    });
+■ [ الـبـادئـة الـحـالـيـة ]
+▸ الـنـظـام : [ ${globalPrefix} ]
+▸ الـمجموعة : [ ${threadPrefix} ]
+
+■ [ مـلاحـظـة ]
+اكتب [ ${threadPrefix}الاوامر ] لعرض كل المهام.
+
+┌━━━━━━━━━━━━━━━━━━━━┐
+┕  ＰＯＷＥＲＥＤ BY ＳＩＮＫＯ  ┙`.trim();
+
+    api.sendMessage(replyMsg, threadID, () => {
+      // تفاعل صح عند النجاح
+      api.setMessageReaction("✅", messageID, () => {}, true);
+    }, messageID);
+
   } catch (error) {
-    console.log(chalk.red(`[Prefix Error] Thread: ${threadID} | Error: ${error.message}`));
-    api.sendMessage(`⚠️ Could not display bot info. Error: ${error.message}`, threadID, messageID);
+    api.setMessageReaction("❌", messageID, () => {}, true);
+    api.sendMessage(`⚠️ فشل عرض البادئة: ${error.message}`, threadID, messageID);
   }
 };
