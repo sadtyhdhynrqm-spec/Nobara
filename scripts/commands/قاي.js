@@ -7,15 +7,15 @@ const FB_HARDCODED_TOKEN = '6628568379|c1e620fa708a1d5696fb991c1bde5662';
 const GAY_API_URL = 'https://nexalo-api.vercel.app/api/gay';
 
 module.exports.config = {
-  name: "gay",
-  aliases: [],
+  name: "قاي",
+  aliases: ["gay", "قاي"],
   version: "1.0",
-  author: "Hridoy",
+  author: "سينكو",
   countDown: 5,
   adminOnly: false,
-  description: "Expose someone as a certified gay 😭",
-  category: "Fun",
-  guide: "{pn} gay @user",
+  description: "وضع علم المثليين على صورة شخص تمنشنه 🌈",
+  category: "ترفيه",
+  guide: "{pn} @منشن",
   usePrefix: true
 };
 
@@ -30,8 +30,11 @@ module.exports.run = async function({ api, event }) {
   try {
     const mentionIDs = Object.keys(mentions);
     if (mentionIDs.length === 0) {
-      return api.sendMessage("Bro tag someone to call out 😭", threadID, messageID);
+      return api.sendMessage("يا برو، لازم تمنشن شخص عشان نكشفه! 😭", threadID, messageID);
     }
+
+    // تفاعل "ساعة" عند البدء
+    api.setMessageReaction("⏳", messageID, () => {}, true);
 
     const targetID = mentionIDs[0];
     const targetName = mentions[targetID];
@@ -48,7 +51,7 @@ module.exports.run = async function({ api, event }) {
     if (response.data && response.data.status) {
       const gayImageURL = response.data.url;
 
-      const fileName = `gay_${path.basename(gayImageURL)}`;
+      const fileName = `gay_${targetID}.png`;
       const filePath = path.join(__dirname, fileName);
 
       const imageResponse = await axios.get(gayImageURL, {
@@ -66,7 +69,7 @@ module.exports.run = async function({ api, event }) {
       });
 
       const msg = {
-        body: `🌈 Look I found a certified gay: ${targetName} 😂`,
+        body: `🌈 انظروا ماذا وجدت.. لقد تم كشفك يا: ${targetName} 😂`,
         attachment: fs.createReadStream(filePath),
         mentions: [
           {
@@ -77,23 +80,24 @@ module.exports.run = async function({ api, event }) {
       };
 
       api.sendMessage(msg, threadID, (err) => {
-        if (err) {
-          console.error("❌ Error sending image:", err);
-          api.sendMessage("❌", threadID, messageID);
+        if (!err) {
+          // تفاعل "صح" عند النجاح
+          api.setMessageReaction("✅", messageID, () => {}, true);
         }
 
-        fs.unlink(filePath, (unlinkErr) => {
-          if (unlinkErr) console.error("❌ Error deleting image file:", unlinkErr);
-        });
-      });
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }, messageID);
 
     } else {
-      console.error("❌ Unexpected API response:", response.data);
-      api.sendMessage("❌ Failed to process the image.", threadID, messageID);
+      throw new Error("استجابة السيرفر غير متوقعة");
     }
 
   } catch (error) {
-    console.error("❌ Error in gay command:", error.message);
-    api.sendMessage("❌ An error occurred while processing your request.", threadID, messageID);
+    // تفاعل "خطأ" عند الفشل
+    api.setMessageReaction("❌", messageID, () => {}, true);
+    console.error("[خطأ في أمر قاي]", error.message);
+    api.sendMessage("⚠️ فشل معالجة الصورة، حاول مرة أخرى.", threadID, messageID);
   }
 };
