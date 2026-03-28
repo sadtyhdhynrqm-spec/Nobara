@@ -4,32 +4,32 @@ const path = require('path');
 
 const SIM_API_URL = 'https://sim.api.nexalo.xyz/v1/chat';
 const API_KEY = 'MAINPOINT'; 
-const LANGUAGE = 'bn'; 
+const LANGUAGE = 'ar'; // تم تغيير اللغة للعربية
 
 module.exports.config = {
-  name: "bot",
-  aliases: ["talk", "sim"],
+  name: "نوبارا",
+  aliases: ["nobara", "تحدث"],
   version: "1.0",
-  author: "Hridoy",
+  author: "سينكو",
   countDown: 5,
   adminOnly: false,
-  description: "Chat with the Nexalo SIM API",
-  category: "AI",
-  guide: "{pn} <question>",
+  description: "الدردشة مع نوبارا المغرورة",
+  category: "ذكاء اصطناعي",
+  guide: "{pn} <نص الرسالة>",
   usePrefix: true
 };
 
-module.exports.run = async function({ api, event, args, config }) {
+module.exports.run = async function({ api, event, args }) {
   const { threadID, messageID } = event;
   const question = args.join(" ").trim();
 
   if (!question) {
-    return api.sendMessage("Please provide a question. Example: !chat What is the weather like?", threadID, messageID);
+    return api.sendMessage("هاه؟ هل أنت غبي؟ أرسل سؤالاً أولاً، لا أملك وقتاً لتضييعه مع الفاشلين! 🙄", threadID, messageID);
   }
 
   try {
-
-    api.setMessageReaction("🕥", messageID, () => {}, true);
+    // التفاعل بساعة رملية عند البدء
+    api.setMessageReaction("⏳", messageID, () => {}, true);
 
     const payload = {
       api: API_KEY,
@@ -71,7 +71,6 @@ module.exports.run = async function({ api, event, args, config }) {
               });
             } catch (err) {
               if (i < retries - 1) {
-                console.warn(`Retry ${i + 1}/${retries} for image download: ${err.message}`);
                 await new Promise(res => setTimeout(res, 2000)); 
                 continue;
               }
@@ -84,39 +83,29 @@ module.exports.run = async function({ api, event, args, config }) {
 
         api.setMessageReaction("✅", messageID, () => {}, true);
         const msg = {
-          body: "", 
+          body: "تفضل، انظر بتمعن لتعرف مدى روعتي! ✨", 
           attachment: fs.createReadStream(filePath)
         };
 
         api.sendMessage(msg, threadID, (err) => {
           if (err) {
-            console.error("❌ Error sending image:", err);
-            api.sendMessage("⚠️ Failed to send image.", threadID);
+            api.sendMessage("تشه، فشل إرسال الصورة.. لا تلمني أنا بل لم اتصالك الضعيف! 💢", threadID);
           }
-
-          fs.unlink(filePath, (unlinkErr) => {
-            if (unlinkErr) console.error("❌ Error deleting file:", unlinkErr);
-          });
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         });
       } else {
-
+        // الرد النصي العادي
         api.setMessageReaction("✅", messageID, () => {}, true);
         api.sendMessage(answer, threadID);
       }
     } else {
       api.setMessageReaction("❌", messageID, () => {}, true);
-      api.sendMessage(`API Error: ${result.message || 'Unknown error'}`, threadID, messageID);
+      api.sendMessage("أوه، يبدو أن النظام يرفض عقلك الصغير.. هناك خطأ ما! 🙄", threadID, messageID);
     }
   } catch (error) {
-    console.error("❌ Error in chat command:", error);
     api.setMessageReaction("❌", messageID, () => {}, true);
-    api.sendMessage(`Error: ${error.message}`, threadID, messageID);
-
+    api.sendMessage(`خطأ؟ حقاً؟ اسمع يا هذا، هناك خطأ تقني: ${error.message}`, threadID, messageID);
     const filePath = path.join(__dirname, "temp_image.jpg");
-    if (fs.existsSync(filePath)) {
-      fs.unlink(filePath, (unlinkErr) => {
-        if (unlinkErr) console.error("❌ Error deleting file on error:", unlinkErr);
-      });
-    }
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   }
 };
