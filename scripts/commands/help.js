@@ -1,79 +1,94 @@
-const chalk = require('chalk');
+const axios = require('axios');
 
 module.exports.config = {
-  name: "help",
-  aliases: ["commands", "cmd"],
-  version: "1.0",
-  author: "Hridoy",
+  name: "اوامر",
+  aliases: ["help", "menu", "أوامر"],
+  version: "1.8",
+  author: "سينكو",
   countDown: 5,
   adminOnly: false,
-  description: "Displays a list of commands or detailed info about a specific command",
-  category: "Utility",
-  guide: "{pn} [command name] - Leave blank to see all commands",
+  description: "عرض قائمة المهام والعمليات المتاحة في النظام",
+  category: "نظام",
+  guide: "{pn} [اسم الأمر]",
   usePrefix: true
 };
 
 module.exports.run = async function({ api, event, args, config }) {
   const { threadID, messageID, senderID } = event;
-  const commands = new Map(global.commands);
+  const commands = global.client.commands;
   const prefix = config.prefix;
 
   try {
+    api.setMessageReaction("⏳", messageID, () => {}, true);
+
     if (!args.length) {
-      let msg = `✨ [ Guide For Beginners - Page 1 ] ✨\n`;
-
       const categories = {};
-      for (const [name, value] of commands) {
-        if (value.config.adminOnly && !config.adminUIDs.includes(senderID)) continue;
-        const category = value.config.category || "Uncategorized";
-        categories[category] = categories[category] || { commands: [] };
-        categories[category].commands.push(name);
-      }
+      let totalCommands = 0;
 
-      Object.keys(categories).sort().forEach((category) => {
-        msg += `\n╭──── [ ${category.toUpperCase()} ]\n│ ✧${categories[category].commands.sort().join(" ✧ ")}\n╰───────────────◊`;
+      commands.forEach((value, name) => {
+        if (value.config.adminOnly && !config.adminUIDs.includes(senderID)) return;
+        const category = value.config.category || "عام";
+        if (!categories[category]) categories[category] = [];
+        categories[category].push(name);
+        totalCommands++;
       });
 
-      msg += `\n\n╭─『 ${config.botName || "NexaloSim"} 』\n╰‣ Total commands: ${commands.size}\n╰‣ Page 1 of 1\n╰‣ A personal Messenger bot ✨\n╰‣ ADMIN: Hridoy`;
+      let msg = `┌  ＮＯＢＡＲＡ • ＭＥＮＵ  ┐\n┕━━━━━━━━━━━━━━━┙\n\n`;
 
-      api.sendMessage(msg, threadID, messageID);
-      console.log(chalk.cyan(`[Help] Full command list requested | ThreadID: ${threadID}`));
+      for (const category in categories) {
+        msg += `■ [ ${category.toUpperCase()} ]\n`;
+        msg += `▸ ${categories[category].join(" ✧ ")}\n\n`;
+      }
+
+      msg += `┌━━━━━━━━━━━━━━━┐\n`;
+      msg += `▸ إجمالي الأوامر: [ ${totalCommands} ]\n`;
+      msg += `▸ البادئة الحالية: [ ${prefix} ]\n`;
+      msg += `▸ الحالة: متصل ونشط ⚡\n`;
+      msg += `┕━━━━━━━━━━━━━━━┙\n\n`;
+      msg += `『 لـلـتـفـاصـيـل: ${prefix}الاوامر + الاسم 』\n`;
+      msg += `『 ＰＯＷＥＲＥＤ BY ＳＩＮＫＯ 』`;
+
+      // رابط الـ GIF الخاص بنوبارا
+      const gifUrl = "https://i.imgur.com/vHExIat.gif"; 
+      const gifStream = await axios.get(gifUrl, { responseType: 'stream' }).then(res => res.data);
+
+      return api.sendMessage({
+        body: msg,
+        attachment: gifStream
+      }, threadID, () => api.setMessageReaction("👑", messageID, () => {}, true), messageID);
+
     } else {
       const commandName = args[0].toLowerCase();
       const command = commands.get(commandName) || commands.get([...commands].find(([_, v]) => v.config.aliases?.includes(commandName))?.[0]);
 
       if (!command) {
-        api.sendMessage(`❌ Command "${commandName}" not found.`, threadID, messageID);
-        console.log(chalk.red(`[Help Error] Command "${commandName}" not found | ThreadID: ${threadID}`));
-        return;
+        api.setMessageReaction("❌", messageID, () => {}, true);
+        return api.sendMessage("⚠️ هذا الأمر غير موجود في قاعدة بيانات نوبارا.", threadID, messageID);
       }
 
       const c = command.config;
       const usage = c.guide?.replace(/{pn}/g, `${prefix}${c.name}`) || `${prefix}${c.name}`;
 
       const res = `
-╭──── NAME ───♡
-│ ${c.name}
-├── INFO
-│ Description: ${c.description}
-│ Aliases: ${c.aliases?.join(", ") || "None"}
-│ Version: ${c.version || "1.0"}
-│ Access: ${c.adminOnly ? "Admin Only" : "All Users"}
-│ Cooldown: ${c.countDown || 1}s
-│ Category: ${c.category || "Uncategorized"}
-│ Author: ${c.author || "Hridoy"}
-├── Usage
-│ ${usage}
-├── Notes
-│ Use ${prefix}help for all commands
-│ <text> = required, [text] = optional
-╰────────────♡`.trim();
+┌  ＮＯＢＡＲＡ • ＩＮＦＯ  ┐
+┕━━━━━━━━━━━━━━━┙
 
-      api.sendMessage(res, threadID, messageID);
-      console.log(chalk.cyan(`[Help] Details for "${commandName}" requested | ThreadID: ${threadID}`));
+■ [ تـفـاصـيـل الـعـمـلـيـة ]
+▸ الاسم: ${c.name}
+▸ الوصف: ${c.description}
+▸ الاختصارات: ${c.aliases?.join(", ") || "لا يوجد"}
+▸ الانتظار: ${c.countDown} ثانية
+▸ الفئة: ${c.category}
+
+■ [ طـريـقـة الاسـتـخـدام ]
+▸ ${usage}
+
+┌━━━━━━━━━━━━━━━┐
+┕  ＤＥＶ BY ＳＩＮＫＯ  ┙`.trim();
+
+      api.sendMessage(res, threadID, () => api.setMessageReaction("ℹ️", messageID, () => {}, true), messageID);
     }
   } catch (err) {
-    console.log(chalk.red(`[Help Error] ${err.message}`));
-    api.sendMessage("❌ Something went wrong with the help command.", threadID, messageID);
+    api.sendMessage("❌ فشل معالج الأوامر في التحميل.", threadID, messageID);
   }
 };
