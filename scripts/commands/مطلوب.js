@@ -10,15 +10,15 @@ function getProfilePictureURL(userID, size = [512, 512]) {
 }
 
 module.exports.config = {
-  name: "wanted",
-  aliases: [],
+  name: "مطلوب",
+  aliases: ["wanted", "مجرم"],
   version: "1.0",
-  author: "Hridoy",
+  author: "سينكو",
   countDown: 5,
   adminOnly: false,
-  description: "Generate a wanted poster with your profile picture or a mentioned user's picture",
-  category: "Fun",
-  guide: "{pn}wanted - Generate a wanted poster with your profile picture\n{pn}wanted @user - Generate a wanted poster with a mentioned user's profile picture",
+  description: "صنع ملصق مطلوب (Wanted) لصورتك أو لمن تمنشنه",
+  category: "ترفيه",
+  guide: "{pn} أو {pn} @منشن",
   usePrefix: true
 };
 
@@ -26,9 +26,11 @@ module.exports.run = async function({ api, event }) {
   const { threadID, messageID, senderID, mentions } = event;
 
   try {
-    // Check if a user was mentioned
+    // تفاعل ساعة عند البدء
+    api.setMessageReaction("⏳", messageID, () => {}, true);
+
     let targetID = senderID;
-    let targetName = null;
+    let targetName = "أنت";
 
     const mentionIDs = Object.keys(mentions);
     if (mentionIDs.length > 0) {
@@ -36,29 +38,16 @@ module.exports.run = async function({ api, event }) {
       targetName = mentions[targetID].replace('@', '').trim();
     }
 
-    // Fetch the target user's name if not already set (for the command user)
-    if (!targetName) {
-      const userInfo = await new Promise((resolve, reject) => {
-        api.getUserInfo([senderID], (err, info) => {
-          if (err) reject(err);
-          else resolve(info);
-        });
-      });
-      targetName = userInfo[senderID]?.name || "Unknown User";
-    }
-
     const profilePicUrl = getProfilePictureURL(targetID);
-
-    // Construct the API URL
     const apiUrl = `${WANTED_API_URL}?url=${encodeURIComponent(profilePicUrl)}`;
 
-    // Call the API to generate the wanted poster
+    // طلب رابط الصورة من الـ API
     const response = await axios.get(apiUrl);
 
     if (response.data && response.data.status && response.data.url) {
       const wantedImageUrl = response.data.url;
 
-      // Send the wanted poster image
+      // جلب الصورة كـ Stream مباشر (أخف وأسرع)
       const imageStream = await axios({
         url: wantedImageUrl,
         method: "GET",
@@ -66,26 +55,23 @@ module.exports.run = async function({ api, event }) {
       }).then(res => res.data);
 
       const msg = {
-        body: `🪙 Wanted poster generated successfully for ${targetName}!`,
+        body: `💰 تم إصدار مذكرة اعتقال بحق: ${targetName}\nالمكافأة: حي أو ميت!`,
         attachment: imageStream
       };
 
-      // Add mention if a user was tagged
       if (targetID !== senderID) {
-        msg.mentions = [
-          {
-            tag: `@${targetName}`,
-            id: targetID
-          }
-        ];
+        msg.mentions = [{ tag: `@${targetName}`, id: targetID }];
       }
 
-      api.sendMessage(msg, threadID, messageID);
+      api.sendMessage(msg, threadID, () => {
+        api.setMessageReaction("✅", messageID, () => {}, true);
+      }, messageID);
     } else {
-      throw new Error(response.data.message || "Wanted poster generation failed");
+      throw new Error("فشل في معالجة الصورة.");
     }
   } catch (err) {
-    console.error("[Wanted Command Error]", err.message);
-    api.sendMessage(`⚠️ Error: ${err.message}`, threadID, messageID);
+    console.error("[خطأ في أمر مطلوب]", err.message);
+    api.setMessageReaction("❌", messageID, () => {}, true);
+    api.sendMessage(`⚠️ فشل صنع الملصق، حاول لاحقاً.`, threadID, messageID);
   }
 };
