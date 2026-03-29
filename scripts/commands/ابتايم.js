@@ -2,8 +2,8 @@ const os = require('os');
 const chalk = require('chalk');
 
 module.exports.config = {
-  name: "ابتايم ",
-  aliases: ["uptime", "up", "السيرفر"],
+  name: "ابتايم",
+  aliases: ["ابتايم", "up", "السيرفر"],
   version: "1.5",
   author: "سينكو",
   countDown: 5,
