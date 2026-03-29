@@ -1,69 +1,56 @@
-const axios = require('axios');
+const chalk = require('chalk');
 
 module.exports.config = {
-  name: "اوامر",
-  aliases: ["help", "menu", "أوامر"],
-  version: "1.8",
+  name: "الاوامر",
+  aliases: ["help", "commands", "cmd"],
+  version: "1.0",
   author: "سينكو",
   countDown: 5,
   adminOnly: false,
-  description: "عرض قائمة المهام والعمليات المتاحة في النظام",
+  description: "عرض قائمة الأوامر أو تفاصيل أمر معين",
   category: "نظام",
-  guide: "{pn} [اسم الأمر]",
+  guide: "{pn} [اسم الأمر] - اتركها فارغة لرؤية الكل",
   usePrefix: true
 };
 
 module.exports.run = async function({ api, event, args, config }) {
   const { threadID, messageID, senderID } = event;
-  const commands = global.client.commands;
+  const commands = new Map(global.commands);
   const prefix = config.prefix;
 
   try {
-    api.setMessageReaction("⏳", messageID, () => {}, true);
-
     if (!args.length) {
-      const categories = {};
-      let totalCommands = 0;
-
-      commands.forEach((value, name) => {
-        if (value.config.adminOnly && !config.adminUIDs.includes(senderID)) return;
-        const category = value.config.category || "عام";
-        if (!categories[category]) categories[category] = [];
-        categories[category].push(name);
-        totalCommands++;
-      });
-
       let msg = `┌  ＮＯＢＡＲＡ • ＭＥＮＵ  ┐\n┕━━━━━━━━━━━━━━━┙\n\n`;
 
-      for (const category in categories) {
-        msg += `■ [ ${category.toUpperCase()} ]\n`;
-        msg += `▸ ${categories[category].join(" ✧ ")}\n\n`;
+      const categories = {};
+      for (const [name, value] of commands) {
+        if (value.config.adminOnly && !config.adminUIDs.includes(senderID)) continue;
+        const category = value.config.category || "عام";
+        categories[category] = categories[category] || { commands: [] };
+        categories[category].commands.push(name);
       }
 
+      Object.keys(categories).sort().forEach((category) => {
+        msg += `■ [ ${category.toUpperCase()} ]\n`;
+        msg += `▸ ${categories[category].commands.sort().join(" ✧ ")}\n\n`;
+      });
+
       msg += `┌━━━━━━━━━━━━━━━┐\n`;
-      msg += `▸ إجمالي الأوامر: [ ${totalCommands} ]\n`;
-      msg += `▸ البادئة الحالية: [ ${prefix} ]\n`;
-      msg += `▸ الحالة: متصل ونشط ⚡\n`;
+      msg += `▸ إجمالي الأوامر: [ ${commands.size} ]\n`;
+      msg += `▸ البادئة: [ ${prefix} ]\n`;
+      msg += `▸ المطور: سـيـنـكـو\n`;
       msg += `┕━━━━━━━━━━━━━━━┙\n\n`;
-      msg += `『 لـلـتـفـاصـيـل: ${prefix}الاوامر + الاسم 』\n`;
-      msg += `『 ＰＯＷＥＲＥＤ BY ＳＩＮＫＯ 』`;
+      msg += `『 ${prefix}الاوامر + اسم الأمر للتفاصيل 』`;
 
-      // رابط الـ GIF الخاص بنوبارا
-      const gifUrl = "https://i.imgur.com/vHExIat.gif"; 
-      const gifStream = await axios.get(gifUrl, { responseType: 'stream' }).then(res => res.data);
-
-      return api.sendMessage({
-        body: msg,
-        attachment: gifStream
-      }, threadID, () => api.setMessageReaction("👑", messageID, () => {}, true), messageID);
-
+      api.sendMessage(msg, threadID, messageID);
+      console.log(chalk.cyan(`[Help] تم طلب قائمة الأوامر | المجموعة: ${threadID}`));
     } else {
       const commandName = args[0].toLowerCase();
       const command = commands.get(commandName) || commands.get([...commands].find(([_, v]) => v.config.aliases?.includes(commandName))?.[0]);
 
       if (!command) {
-        api.setMessageReaction("❌", messageID, () => {}, true);
-        return api.sendMessage("⚠️ هذا الأمر غير موجود في قاعدة بيانات نوبارا.", threadID, messageID);
+        api.sendMessage(`❌ الأمر "${commandName}" غير موجود.`, threadID, messageID);
+        return;
       }
 
       const c = command.config;
@@ -73,12 +60,12 @@ module.exports.run = async function({ api, event, args, config }) {
 ┌  ＮＯＢＡＲＡ • ＩＮＦＯ  ┐
 ┕━━━━━━━━━━━━━━━┙
 
-■ [ تـفـاصـيـل الـعـمـلـيـة ]
+■ [ مـعـلـومـات الـمـهـمـة ]
 ▸ الاسم: ${c.name}
 ▸ الوصف: ${c.description}
 ▸ الاختصارات: ${c.aliases?.join(", ") || "لا يوجد"}
-▸ الانتظار: ${c.countDown} ثانية
-▸ الفئة: ${c.category}
+▸ الانتظار: ${c.countDown || 1} ثانية
+▸ الفئة: ${c.category || "عام"}
 
 ■ [ طـريـقـة الاسـتـخـدام ]
 ▸ ${usage}
@@ -86,9 +73,10 @@ module.exports.run = async function({ api, event, args, config }) {
 ┌━━━━━━━━━━━━━━━┐
 ┕  ＤＥＶ BY ＳＩＮＫＯ  ┙`.trim();
 
-      api.sendMessage(res, threadID, () => api.setMessageReaction("ℹ️", messageID, () => {}, true), messageID);
+      api.sendMessage(res, threadID, messageID);
     }
   } catch (err) {
-    api.sendMessage("❌ فشل معالج الأوامر في التحميل.", threadID, messageID);
+    console.log(chalk.red(`[Help Error] ${err.message}`));
+    api.sendMessage("❌ حدث خطأ في معالج الأوامر.", threadID, messageID);
   }
 };
