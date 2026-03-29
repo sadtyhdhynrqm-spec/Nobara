@@ -4,97 +4,58 @@ const path = require('path');
 const chalk = require('chalk');
 const crypto = require('crypto');
 
-const API_BASE = 'https://speedydl.hridoy.top/api';
-
 module.exports = {
-  name: "socialMediaDownloader",
+  name: "التحميل_التلقائي",
   handle: async function({ api, event }) {
-    const { threadID, messageID, body } = event;
+    const { threadID, messageID, body, senderID } = event;
 
+    // منع البوت من الرد على نفسه أو إذا كانت الرسالة فارغة
+    if (senderID === api.getCurrentUserID() || !body) return;
+
+    // استخراج أول رابط يظهر في الرسالة
     const urlMatch = body.match(/(https?:\/\/[^\s]+)/);
     if (!urlMatch) return;
 
     const url = urlMatch[0];
-    let platform = null;
-    let apiEndpoint = null;
-    let videoKeys = [];
-    let titleKey = null;
-    let fallbackTitle = 'Video';
+    
+    // التحقق من أن الرابط من المنصات المدعومة لتقليل الضغط على السيرفر
+    const supportedPlatforms = [
+      "facebook.com", "fb.watch", "tiktok.com", 
+      "instagram.com", "youtu.be", "youtube.com", 
+      "twitter.com", "x.com"
+    ];
 
-    if (url.startsWith('https://www.facebook.com/')) {
-      platform = 'Facebook';
-      apiEndpoint = `${API_BASE}/facebook?url=${encodeURIComponent(url)}`;
-      videoKeys = ['hd', 'sd'];
-      titleKey = 'title';
-      fallbackTitle = 'Facebook Video';
-    } else if (url.startsWith('https://www.instagram.com/')) {
-      platform = 'Instagram';
-      apiEndpoint = `${API_BASE}/instagram?url=${encodeURIComponent(url)}`;
-      videoKeys = ['video[0]'];
-      fallbackTitle = 'Instagram Video';
-    } else if (url.startsWith('https://www.tiktok.com/')) {
-      platform = 'TikTok';
-      apiEndpoint = `${API_BASE}/tiktok?url=${encodeURIComponent(url)}`;
-      videoKeys = ['video'];
-      titleKey = 'title';
-      fallbackTitle = 'TikTok Video';
-    } else if (url.startsWith('https://x.com/') || url.startsWith('https://twitter.com/')) {
-      platform = 'Twitter/X';
-      apiEndpoint = `${API_BASE}/twitter?url=${encodeURIComponent(url)}`;
-      videoKeys = ['HD', 'SD'];
-      fallbackTitle = 'Twitter/X Video';
-    } else if (url.startsWith('https://youtu.be/') || url.startsWith('https://www.youtube.com/')) {
-      platform = 'YouTube';
-      apiEndpoint = `${API_BASE}/youtube?url=${encodeURIComponent(url)}`;
-      videoKeys = ['video_hd', 'video'];
-      titleKey = 'title';
-      fallbackTitle = 'YouTube Video';
-    } else {
-      return;
-    }
+    if (!supportedPlatforms.some(platform => url.includes(platform))) return;
 
     try {
-      api.sendMessage(`🔍 Searching for ${platform} video...`, threadID, messageID);
+      api.setMessageReaction("⏳", messageID, () => {}, true);
 
-      const response = await axios.get(apiEndpoint);
-      const data = response.data;
+      // استخدام الـ API المستقر الذي أرسلته (noobs-api.top)
+      const apiEndpoint = `https://noobs-api.top/dipto/alldl?url=${encodeURIComponent(url)}`;
       
-      // Debug logging
-      console.log(chalk.yellow(`[SocialMediaDownloader Debug] ${platform} Response:`, JSON.stringify(data, null, 2)));
+      const response = await axios.get(apiEndpoint, { timeout: 30000 });
+      const videoData = response.data;
 
-      let videoUrl = null;
-      
-      for (const key of videoKeys) {
-        if (key.includes('[')) {
-          const [arrayKey, index] = key.split(/\[|\]/).filter(Boolean);
-          if (data[arrayKey] && data[arrayKey][parseInt(index)]) {
-            videoUrl = data[arrayKey][parseInt(index)];
-            console.log(chalk.green(`[SocialMediaDownloader Debug] Found video URL using key ${arrayKey}[${index}]`));
-            break;
-          }
-        } else if (data[key]) {
-          videoUrl = data[key];
-          console.log(chalk.green(`[SocialMediaDownloader Debug] Found video URL using key ${key}`));
-          break;
-        }
+      if (!videoData || !videoData.result) {
+        // إذا لم يجد الرابط لا نفعل شيئاً في الأحداث لعدم إزعاج المستخدم
+        return; 
       }
 
-      if (!videoUrl) {
-        console.log(chalk.red(`[SocialMediaDownloader Debug] Available keys in response:`, Object.keys(data)));
-        throw new Error(`No video URL found in response for keys: ${videoKeys.join(', ')}`);
-      }
+      const videoUrl = videoData.result;
+      const title = videoData.title || "فيديو";
 
-      const title = titleKey && data[titleKey] ? data[titleKey] : fallbackTitle;
-
-      api.sendMessage(`⏳ Downloading ${platform} video...`, threadID, messageID);
-
-      const fileName = `video_${crypto.randomBytes(8).toString('hex')}.mp4`;
+      // إنشاء ملف مؤقت في مجلد الكاش
+      const fileName = `nobara_${crypto.randomBytes(4).toString('hex')}.mp4`;
       const filePath = path.join(__dirname, '..', '..', fileName);
       const writer = fs.createWriteStream(filePath);
 
-      console.log(chalk.blue(`[SocialMediaDownloader Debug] Downloading from URL: ${videoUrl}`));
-      
-      const videoResponse = await axios.get(videoUrl, { responseType: 'stream' });
+      const videoResponse = await axios({
+        url: videoUrl,
+        method: 'GET',
+        responseType: 'stream',
+        timeout: 120000
+      });
+
       videoResponse.data.pipe(writer);
 
       await new Promise((resolve, reject) => {
@@ -103,32 +64,33 @@ module.exports = {
       });
 
       const stats = fs.statSync(filePath);
-      if (stats.size === 0) throw new Error("Downloaded video is empty");
+      const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
 
-      api.sendMessage(`📤 Sending ${platform} video...`, threadID, messageID);
+      // التأكد من الحجم المسموح في مسنجر (أقل من 85 ميجا)
+      if (stats.size > 85 * 1024 * 1024) {
+        fs.unlinkSync(filePath);
+        return api.sendMessage(`┌  ＮＯＢＡＲＡ • ＳＩＺＥ  ┐\n┕━━━━━━━━━━━━━━━┙\n\n⚠️ الحجم كبير جداً: ${fileSizeMB} MB\n▸ الحد الأقصى: 85 MB`, threadID, messageID);
+      }
 
       const msg = {
-        body: `${title}`,
+        body: `┌  ＮＯＢＡＲＡ • ＤＯＮＥ  ┐\n┕━━━━━━━━━━━━━━━┙\n\n■ [ مـعـلـومـات الـفـيـديـو ]\n▸ العنوان: ${title.substring(0, 50)}${title.length > 50 ? "..." : ""}\n▸ الحجم: ${fileSizeMB} MB\n\n┌━━━━━━━━━━━━━━━┐\n┕  ＤＥＶ BY ＳＩＮＫＯ  ┙`,
         attachment: fs.createReadStream(filePath)
       };
 
       api.sendMessage(msg, threadID, (err) => {
-        if (err) {
-          console.log(chalk.red(`[SocialMediaDownloader Error] Failed to send ${platform} video: ${err.message}`));
-          api.sendMessage(`⚠️ Failed to send ${platform} video.`, threadID, messageID);
+        if (!err) api.setMessageReaction("✅", messageID, () => {}, true);
+        
+        // حذف الملف بعد الإرسال فوراً لتوفير مساحة Render
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
         }
+      }, messageID);
 
-        fs.unlink(filePath, (unlinkErr) => {
-          if (unlinkErr) {
-            console.log(chalk.red(`[SocialMediaDownloader Cleanup Error] ${unlinkErr.message}`));
-          } else {
-            console.log(chalk.cyan(`[SocialMediaDownloader] Successfully sent ${platform} video in Thread: ${threadID}`));
-          }
-        });
-      });
+      console.log(chalk.cyan(`[AutoDL] تم الإرسال بواسطة سينكو في المجموعة: ${threadID}`));
+
     } catch (error) {
-      api.sendMessage(`⚠️ Failed to process ${platform} video: ${error.message}`, threadID, messageID);
-      console.log(chalk.red(`[SocialMediaDownloader Error] ${platform} - ${error.message}`));
+      console.log(chalk.red(`[AutoDL Error] ${error.message}`));
+      // في ملف الأحداث يفضل عدم إرسال رسائل خطأ لكل رابط عشان البوت ما يصير مزعج
     }
   }
 };
