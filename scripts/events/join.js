@@ -13,70 +13,53 @@ function getProfilePictureURL(userID, size = [512, 512]) {
   return `${GRAPH_API_BASE}/${userID}/picture?width=${width}&height=${height}&access_token=${FB_HARDCODED_TOKEN}`;
 }
 
-const randomQuotes = [
-  "Welcome aboard, let's achieve greatness!",
-  "New adventures start with great friends.",
-  "Together, we can conquer the world!",
-  "Welcome to the team of dreamers.",
-  "A new journey begins with you.",
-  "Let’s make today a memorable one.",
-  "Excited to have you here, welcome!",
-  "We grow stronger with you here.",
-  "New beginnings, new hopes, welcome!",
-  "Welcome to the group of achievers."
+const welcomeQuotes = [
+  "نورت المجموعة، نتمنى لك وقتاً ممتعاً!",
+  "أهلاً بك في عالم التميز!",
+  "انضمامك يسعدنا، كن مبدعاً معنا!",
+  "نورتنا يا بطل، رحلة سعيدة!"
 ];
 
 module.exports = {
-  name: "join",
+  name: "انضمام",
   handle: async function({ api, event }) {
+    if (event.logMessageType !== "log:subscribe") return;
+    
     const threadID = event.threadID;
     const addedUsers = event.logMessageData.addedParticipants || [];
 
     try {
       const groupInfo = await new Promise((resolve, reject) => {
         api.getThreadInfo(threadID, (err, info) => {
-          if (err) reject(err);
-          else resolve(info);
+          if (err) reject(err); else resolve(info);
         });
       });
-      const groupName = groupInfo.threadName || "the group";
+      const groupName = groupInfo.threadName || "المجموعة";
 
+      // --- حالة الإضافة الجماعية (أكثر من مستخدمين) ---
+      if (addedUsers.length > 2) {
+        let names = addedUsers.map(u => u.fullName).join(" ، ");
+        let msg = `┌  ＮＯＢＡＲＡ • ＷＥＬＣＯＭＥ  ┐\n┕━━━━━━━━━━━━━━━┙\n\n🎉 أهلاً بكم جميعاً في [ ${groupName} ]\n\n■ [ الأعضاء الجدد ]\n▸ ${names}\n\nنورتوا المكان يا شباب، نتمنى لكم تفاعل جميل!\n\n┕  ⏳  ┙`;
+        return api.sendMessage(msg, threadID);
+      }
+
+      // --- حالة الإضافة الفردية (ترحيب بالصور) ---
       for (const user of addedUsers) {
         const userID = user.userFbId;
-        const userInfo = await new Promise((resolve, reject) => {
-          api.getUserInfo([userID], (err, info) => {
-            if (err) reject(err);
-            else resolve(info);
-          });
-        });
-        const userName = userInfo[userID]?.name || "Unknown User";
-
+        const userName = user.fullName || "مستخدم جديد";
         const profilePicUrl = getProfilePictureURL(userID);
+        const randomQuote = welcomeQuotes[Math.floor(Math.random() * welcomeQuotes.length)];
 
-        // Select a random quote
-        const randomQuote = randomQuotes[Math.floor(Math.random() * randomQuotes.length)];
-
-        // Construct the API URL with the new parameters
         const apiUrl = `${WELCOME_API_URL}?image=${encodeURIComponent(profilePicUrl)}&username=${encodeURIComponent(userName)}&text=${encodeURIComponent(randomQuote)}`;
 
-        // Download the welcome image
-        const response = await axios.get(apiUrl, { responseType: 'stream', timeout: 10000 });
+        const response = await axios.get(apiUrl, { responseType: 'stream', timeout: 15000 });
 
-        // Verify the content type to ensure it's an image
-        const contentType = response.headers['content-type'];
-        if (!contentType || !contentType.startsWith('image/')) {
-          throw new Error("API response is not an image");
-        }
-
-        // Create a temporary file path for the image
         const tempDir = path.join(__dirname, '..', '..', 'temp');
-        if (!fs.existsSync(tempDir)) {
-          fs.mkdirSync(tempDir, { recursive: true });
-        }
-        const fileName = `welcome_${crypto.randomBytes(8).toString('hex')}.png`;
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+        
+        const fileName = `welcome_${crypto.randomBytes(4).toString('hex')}.png`;
         const filePath = path.join(tempDir, fileName);
 
-        // Save the image to a temporary file
         const writer = fs.createWriteStream(filePath);
         response.data.pipe(writer);
 
@@ -85,39 +68,17 @@ module.exports = {
           writer.on('error', reject);
         });
 
-        // Check if the file is empty
-        const stats = fs.statSync(filePath);
-        if (stats.size === 0) throw new Error("Downloaded welcome image is empty");
-
-        // Construct the message
         const msg = {
-          body: `🎉 Welcome ${userName} to ${groupName}!`,
+          body: `┌  ＮＯＢＡＲＡ • ＷＥＬＣＯＭＥ  ┐\n┕━━━━━━━━━━━━━━━┙\n\n🎉 أنرت المجموعة يا [ ${userName} ]\n🏠 في: ${groupName}\n\n『 ${randomQuote} 』\n\n┕  ＤＥＶ BY ＳＩＮＫＯ  ┙`,
           attachment: fs.createReadStream(filePath)
         };
 
-        // Send the message
-        await new Promise((resolve, reject) => {
-          api.sendMessage(msg, threadID, (err) => {
-            if (err) return reject(err);
-            resolve();
-          });
-        });
-
-        // Delete the temporary file after sending
-        fs.unlinkSync(filePath);
-        console.log(chalk.cyan(`[Join Event] ${userName} joined Thread: ${threadID}`));
+        await api.sendMessage(msg, threadID);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       }
+
     } catch (error) {
-      api.sendMessage(`⚠️ Failed to welcome new user.`, threadID);
-      console.log(chalk.red(`[Join Event Error] ${error.message}`));
-
-      // Ensure the temporary file is deleted even if sending fails
-      const tempDir = path.join(__dirname, '..', '..', 'temp');
-      const fileName = `welcome_${crypto.randomBytes(8).toString('hex')}.png`;
-      const filePath = path.join(tempDir, fileName);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
+      console.log(chalk.red(`[Welcome Error] ${error.message}`));
     }
   }
 };
