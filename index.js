@@ -12,33 +12,33 @@ const pm2 = require('pm2');
 let globalConfig;
 let appState;
 
+// --- تحميل الإعدادات ---
 try {
   globalConfig = JSON.parse(fs.readFileSync('config.json', 'utf8'));
 } catch (error) {
-  console.error(chalk.red('[Config Error] Failed to parse config.json:'), error.message);
+  console.error(chalk.red('[خطأ في الإعدادات] فشل تحميل ملف config.json:'), error.message);
   process.exit(1);
 }
 
 try {
   appState = JSON.parse(fs.readFileSync('appState.json', 'utf8'));
 } catch (error) {
-  console.error(chalk.red('[AppState Error] Failed to parse appState.json:'), error.message);
+  console.error(chalk.red('[خطأ في الحالة] فشل تحميل ملف appState.json:'), error.message);
   process.exit(1);
 }
 
-const langCode = globalConfig.language || 'en';
+// --- إعداد اللغات ---
+const langCode = globalConfig.language || 'ar'; // افتراضي عربي لعيون سينكو
 let pathLanguageFile = path.join(__dirname, 'languages', `${langCode}.lang`);
 
 if (!fs.existsSync(pathLanguageFile)) {
-  console.warn(`Can't find language file ${langCode}, using default language file "en.lang"`);
-  pathLanguageFile = path.join(__dirname, 'languages', 'en.lang');
+  console.warn(`ملف اللغة ${langCode} غير موجود، سيتم استخدام اللغة الافتراضية "ar.lang"`);
+  pathLanguageFile = path.join(__dirname, 'languages', 'ar.lang');
 }
 
+// (منطق قراءة اللغة يبقى كما هو برمجياً)
 const readLanguage = fs.readFileSync(pathLanguageFile, "utf-8");
-const languageData = readLanguage
-  .split(/\r?\n|\r/)
-  .filter(line => line && !line.trim().startsWith("#") && !line.trim().startsWith("//") && line !== "");
-
+const languageData = readLanguage.split(/\r?\n|\r/).filter(line => line && !line.trim().startsWith("#") && line !== "");
 global.language = {};
 for (const sentence of languageData) {
   const getSeparator = sentence.indexOf('=');
@@ -46,147 +46,44 @@ for (const sentence of languageData) {
   const itemValue = sentence.slice(getSeparator + 1).trim();
   const head = itemKey.slice(0, itemKey.indexOf('.'));
   const key = itemKey.replace(head + '.', '');
-  const value = itemValue.replace(/\\n/gi, '\n');
   if (!global.language[head]) global.language[head] = {};
-  global.language[head][key] = value;
+  global.language[head][key] = itemValue.replace(/\\n/gi, '\n');
 }
 
 function getText(head, key, ...args) {
-  if (!global.language[head]?.[key]) return `Can't find text: "${head}.${key}"`;
+  if (!global.language[head]?.[key]) return `لم يتم العثور على النص: "${head}.${key}"`;
   let text = global.language[head][key];
   for (let i = args.length - 1; i >= 0; i--) text = text.replace(new RegExp(`%${i + 1}`, 'g'), args[i]);
   return text;
 }
 
-// Bot start time for uptime calculation
 const startTime = Date.now();
 
-// Set up Express web server
+// --- إعداد سيرفر الويب (الاستمرارية) ---
 const app = express();
-let PORT = process.env.PORT || 28140; // Default to 28140 for ip.ozima.cloud:28140
-const MAX_PORT_ATTEMPTS = 5; // Try up to 5 ports if the default is in use
-
-// Serve static files (HTML, CSS, JS)
+let PORT = process.env.PORT || 28140;
 app.use(express.static(path.join(__dirname, 'public')));
-
 
 async function startServer(attempt = 0) {
   try {
     const server = await new Promise((resolve, reject) => {
-      const serverInstance = app.listen(PORT, () => {
-        console.log(`[Index] Web server running on port ${PORT}`);
-        resolve(serverInstance);
+      app.listen(PORT, () => {
+        console.log(chalk.cyan(`[سيرفر] البوت يعمل على المنفذ: ${PORT}`));
+        resolve();
       }).on('error', (err) => {
-        if (err.code === 'EADDRINUSE' && attempt < MAX_PORT_ATTEMPTS) {
-          console.warn(`[Index] Port ${PORT} is in use, trying port ${PORT + 1}...`);
+        if (err.code === 'EADDRINUSE' && attempt < 5) {
           PORT++;
           startServer(attempt + 1).then(resolve).catch(reject);
-        } else {
-          reject(err);
-        }
+        } else reject(err);
       });
-    });
-
-
-    const wss = new WebSocketServer({ server });
-
-    // Store console logs
-    const logs = [];
-
-    const originalConsoleLog = console.log;
-    const originalConsoleError = console.error;
-    const originalConsoleWarn = console.warn;
-
-    function broadcastLog(message, type = 'log') {
-      const logEntry = { type, message: `[${new Date().toISOString()}] ${message}`, timestamp: Date.now() };
-      logs.push(logEntry);
- 
-      if (logs.length > 100) logs.shift();
-
-      wss.clients.forEach(client => {
-        if (client.readyState === 1) { 
-          client.send(JSON.stringify({ type: 'log', data: logEntry }));
-        }
-      });
-    }
-
-    console.log = (...args) => {
-      const message = args.join(' ');
-      broadcastLog(message, 'log');
-      originalConsoleLog.apply(console, args);
-    };
-
-    console.error = (...args) => {
-      const message = args.join(' ');
-      broadcastLog(message, 'error');
-      originalConsoleError.apply(console, args);
-    };
-
-    console.warn = (...args) => {
-      const message = args.join(' ');
-      broadcastLog(message, 'warn');
-      originalConsoleWarn.apply(console, args);
-    };
-
-
-    wss.on('connection', (ws) => {
-      console.log('[WebSocket] Client connected');
-
-
-      async function checkBotStatus(retries = 3, delay = 1000) {
-        return new Promise((resolve) => {
-          pm2.connect((err) => {
-            if (err) {
-              console.error('[PM2] Failed to connect:', err.message);
-              resolve({ status: 'running', uptime: Math.floor((Date.now() - startTime) / 1000) });
-              return;
-            }
-
-            pm2.describe('bot', (err, description) => {
-              pm2.disconnect();
-              if (err || !description || description.length === 0) {
-                console.error('[PM2] Failed to get bot status:', err ? err.message : 'No process found');
-                if (retries > 0) {
-                  console.log(`[PM2] Retrying (${retries} attempts left)...`);
-                  setTimeout(() => {
-                    checkBotStatus(retries - 1, delay).then(resolve);
-                  }, delay);
-                } else {
-               
-                  const uptime = Math.floor((Date.now() - startTime) / 1000);
-                  resolve({ status: 'running', uptime });
-                }
-              } else {
-                const status = description[0].pm2_env.status === 'online' ? 'running' : 'stopped';
-                const uptime = Math.floor((Date.now() - startTime) / 1000);
-                resolve({ status, uptime });
-              }
-            });
-          });
-        });
-      }
-
-      // Send initial data (status, uptime, logs)
-      checkBotStatus().then(({ status, uptime }) => {
-        ws.send(JSON.stringify({ type: 'status', data: { status, uptime } }));
-      });
-
-      // Send all existing logs
-      ws.send(JSON.stringify({ type: 'logs', data: logs }));
-    });
-
-    wss.on('close', () => {
-      console.log('[WebSocket] Client disconnected');
     });
   } catch (err) {
-    console.error('[Index] Failed to start web server:', err.message);
-    process.exit(1);
+    console.error('[سيرفر] فشل في بدء تشغيل سيرفر الويب:', err.message);
   }
 }
-
-// Start the web server
 startServer();
 
+// --- تحميل الأوامر والأحداث ---
 const commands = new Map();
 const events = new Map();
 const commandsDir = path.join(__dirname, 'scripts', 'commands');
@@ -202,17 +99,15 @@ const chalkGradient = (text) => {
   return result;
 };
 
-const abstractBox = chalk.hex('#55FFFF')('═══════✨═══════✨═══════✨═══════');
+const abstractBox = chalk.hex('#55FFFF')('═══════════════✨ＮＯＢＡＲＡ✨═══════════════');
 
 fs.readdirSync(commandsDir).forEach(file => {
-  if (file.endsWith('.js') && !fs.lstatSync(path.join(commandsDir, file)).isDirectory()) {
+  if (file.endsWith('.js')) {
     try {
       const command = require(path.join(commandsDir, file));
       commands.set(command.config.name.toLowerCase(), command);
-      console.log(chalk.hex('#00FFFF')(`✨ Command Loaded: ${chalkGradient(command.config.name)} ✨`));
-    } catch (error) {
-      console.error(chalk.hex('#FF5555')(`🔥 Command Load Failed: ${file} - ${error.message}`));
-    }
+      console.log(chalk.hex('#00FFFF')(`✨ تم تحميل الأمر: ${chalkGradient(command.config.name)}`));
+    } catch (e) { console.error(chalk.red(`🔥 فشل تحميل الأمر ${file}: ${e.message}`)); }
   }
 });
 
@@ -222,175 +117,75 @@ if (fs.existsSync(eventsDir)) {
       try {
         const eventHandler = require(path.join(eventsDir, file));
         events.set(eventHandler.name.toLowerCase(), eventHandler);
-        console.log(chalk.hex('#00FFFF')(`✨ Event Handler Loaded: ${chalkGradient(eventHandler.name)} ✨`));
-      } catch (error) {
-        console.error(chalk.hex('#FF5555')(`🔥 Event Handler Load Failed: ${file} - ${error.message}`));
-      }
+        console.log(chalk.hex('#AA55FF')(`✨ تم تحميل الحدث: ${chalkGradient(eventHandler.name)}`));
+      } catch (e) { console.error(chalk.red(`🔥 فشل تحميل الحدث ${file}: ${e.message}`)); }
     }
   });
 }
 
 global.commands = commands;
 
-let lastCommitSha = null;
-let api = null;
+// --- تسجيل الدخول والعمليات ---
+fca({ appState }, (err, api) => {
+  if (err) return console.error(chalk.red('🔥 فشل تسجيل الدخول:'), err.stack);
 
-async function checkForUpdates() {
-  try {
-    const { data: lastCommit } = await axios.get('https://api.github.com/repos/1dev-hridoy/Messenger-NexaloSIM-Bot/commits/main');
-    const currentCommitSha = lastCommit.sha;
-
-    if (!lastCommitSha) {
-      lastCommitSha = currentCommitSha;
-      console.log(chalk.green('[Update Check] Initial commit SHA:', lastCommitSha));
-      return { isUpdateAvailable: false, commit: null };
-    }
-
-    if (lastCommitSha !== currentCommitSha) {
-      console.log(chalk.green('[Update Check] New commit detected:', currentCommitSha));
-      lastCommitSha = currentCommitSha;
-      return { isUpdateAvailable: true, commit: lastCommit };
-    } else {
-      console.log(chalk.blue('[Update Check] No new updates available.'));
-      return { isUpdateAvailable: false, commit: null };
-    }
-  } catch (error) {
-    console.error(chalk.red('[Update Check Error]', error.message));
-    throw error;
-  }
-}
-
-fca({ appState }, (err, fcaApi) => {
-  if (err) {
-    console.error(chalk.hex('#FF5555')('🔥 Login Failed:'), err.stack);
-    return;
-  }
-
-  api = fcaApi;
-
-  console.log(chalk.hex('#00FFFF')(`🌟 ${chalkGradient(`${globalConfig.botName} is Online!`)} 🌟`));
+  console.log(chalk.hex('#00FFFF')(`🌟 ${chalkGradient(`${globalConfig.botName} جاهز للعمل!`)} 🌟`));
 
   api.listenMqtt((err, event) => {
-    if (err) {
-      console.error(chalk.hex('#FF5555')('🔥 MQTT Error:'), err?.stack || err);
-      return;
-    }
+    if (err) return;
 
-    if (event && event.type === 'message') {
-      const message = event.body || '';
-      const senderID = event.senderID;
-      const threadID = event.threadID;
-      const messageID = event.messageID;
-      const isImage = event.attachments && event.attachments.length > 0 && event.attachments[0].type === 'photo';
+    if (event.type === 'message') {
+      const { body, senderID, threadID, messageID } = event;
+      const isImage = event.attachments?.[0]?.type === 'photo';
 
       api.getUserInfo(senderID, (err, userInfo) => {
-        if (err) {
-          console.error(chalk.hex('#FF5555')('🔥 User Info Fetch Failed:'), err);
-          return;
-        }
+        const userName = userInfo[senderID]?.name || 'مستخدم غير معروف';
 
-        const userName = userInfo[senderID]?.name || 'Unknown User';
-
+        // طباعة اللوج الفخم في الترمكس
         console.log(abstractBox);
-        console.log(chalk.hex('#00FFFF')(`👤 User: ${chalkGradient(userName)}`));
-        console.log(chalk.hex('#55AAFF')(`📩 Type: ${chalkGradient(isImage ? 'Image' : 'Text')}`));
-        console.log(chalk.hex('#AA55FF')(`💬 Message: ${chalkGradient(isImage ? 'Image Attachment' : message)}`));
-        console.log(chalk.hex('#FF55AA')(`🧵 Thread: ${chalkGradient(threadID)}`));
+        console.log(chalk.hex('#00FFFF')(`👤 العضو: ${userName}`));
+        console.log(chalk.hex('#55AAFF')(`💬 الرسالة: ${isImage ? '[صورة]' : body}`));
+        console.log(chalk.hex('#FF55AA')(`🧵 المجموعة: ${threadID}`));
         console.log(abstractBox);
 
-        const socialMediaDownloader = events.get('socialmediadownloader');
-        if (socialMediaDownloader) {
-          try {
-            socialMediaDownloader.handle({ api, event });
-          } catch (error) {
-            console.error(chalk.red(`[SocialMediaDownloader Handler Error] ${error.message}`));
-          }
-        }
+        // --- معالجة التحميل التلقائي (Event) ---
+        const autoDL = events.get('التحميل_التلقائي') || events.get('socialmediadownloader');
+        if (autoDL) autoDL.handle({ api, event });
 
-        const messageLower = message.toLowerCase().trim();
-        let noPrefixCommand = null;
+        const msgLower = (body || "").toLowerCase().trim();
+        const prefix = globalConfig.prefix;
 
-        for (const [name, command] of commands) {
-          if (command.config.usePrefix === false) {
-            if (messageLower === name || (command.config.aliases && command.config.aliases.includes(messageLower))) {
-              noPrefixCommand = command;
-              break;
-            }
-          }
-        }
+        // --- أوامر بدون بادئة ---
+        let noPrefixCmd = [...commands.values()].find(c => c.config.usePrefix === false && (msgLower === c.config.name || c.config.aliases?.includes(msgLower)));
+        if (noPrefixCmd) return noPrefixCmd.run({ api, event, args: msgLower.split(/\s+/), config: globalConfig, getText });
 
-        if (noPrefixCommand) {
-          try {
-            noPrefixCommand.run({ api, event, args: messageLower.split(/\s+/), config: globalConfig, getText });
-          } catch (error) {
-            api.sendMessage(`⚠️ Error: ${error.message}`, threadID, messageID);
-            console.error(chalk.hex('#FF5555')(`🔥 Command Crashed (${noPrefixCommand.config.name}):`), error.stack);
-          }
-          return;
-        }
-
-        if (message.startsWith(globalConfig.prefix)) {
-          const [commandName, ...args] = message.slice(globalConfig.prefix.length).trim().split(/\s+/);
-          const cmdNameLower = commandName.toLowerCase();
-
-          let command = commands.get(cmdNameLower);
-          if (!command) {
-            for (const [name, cmd] of commands) {
-              if (cmd.config.aliases && cmd.config.aliases.includes(cmdNameLower)) {
-                command = cmd;
-                break;
-              }
-            }
-          }
+        // --- أوامر بالبادئة (Prefix) ---
+        if (body?.startsWith(prefix)) {
+          const args = body.slice(prefix.length).trim().split(/\s+/);
+          const cmdName = args.shift().toLowerCase();
+          let command = commands.get(cmdName) || [...commands.values()].find(c => c.config.aliases?.includes(cmdName));
 
           if (command) {
-            const { config } = command;
-
-            if (config.adminOnly && !globalConfig.adminUIDs.includes(senderID)) {
+            if (command.config.adminOnly && !globalConfig.adminUIDs.includes(senderID)) {
               api.setMessageReaction("❌", messageID, () => {}, true);
-              return api.sendMessage(getText("general", "adminOnly"), threadID, messageID);
+              return api.sendMessage("⚠️ هذا الأمر للمطورين فقط يا وحش!", threadID, messageID);
             }
-
             try {
               command.run({ api, event, args, config: globalConfig, getText });
-            } catch (error) {
-              api.setMessageReaction("❌", messageID, () => {}, true);
-              api.sendMessage(`⚠️ Error: ${error.message}`, threadID, messageID);
-              console.error(chalk.hex('#FF5555')(`🔥 Command Crashed (${commandName}):`), error.stack);
+            } catch (e) {
+              api.sendMessage(`⚠️ خطأ: ${e.message}`, threadID, messageID);
             }
           } else {
-            api.setMessageReaction("❌", messageID, () => {}, true);
-            api.sendMessage(`⚠️ Unknown command: ${commandName}`, threadID, messageID);
-            console.log(chalk.hex('#FF5555')(`❓ Unknown Command: ${chalkGradient(commandName)} | Thread: ${chalkGradient(threadID)}`));
+            api.sendMessage(`🦆 [${cmdName}]  ${prefix}`, threadID, messageID);
           }
         }
       });
     }
 
-    if (event && event.type === 'event' && event.threadID) {
-      const threadID = event.threadID;
-
-      if (event.logMessageType === 'log:subscribe') {
-        const joinHandler = events.get('join');
-        if (joinHandler) {
-          try {
-            joinHandler.handle({ api, event });
-          } catch (error) {
-            console.error(chalk.red(`[Join Event Handler Error] ${error.message}`));
-          }
-        }
-      }
-
-      if (event.logMessageType === 'log:unsubscribe') {
-        const leaveHandler = events.get('leave');
-        if (leaveHandler) {
-          try {
-            leaveHandler.handle({ api, event });
-          } catch (error) {
-            console.error(chalk.red(`[Leave Event Handler Error] ${error.message}`));
-          }
-        }
-      }
+    // --- معالجة أحداث الانضمام والمغادرة ---
+    if (event.type === 'event') {
+      if (event.logMessageType === 'log:subscribe') events.get('انضمام')?.handle({ api, event });
+      if (event.logMessageType === 'log:unsubscribe') events.get('مغادرة')?.handle({ api, event });
     }
   });
 });
