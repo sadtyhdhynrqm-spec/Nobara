@@ -14,19 +14,22 @@ function getProfilePictureURL(userID, size = [512, 512]) {
 }
 
 const shortQuotes = [
-  "Farewell, dear friend!",
-  "Wishing you the best!",
-  "Goodbye, take care!",
-  "Until we meet again!",
-  "Safe travels, friend!",
-  "Best of luck always!",
-  "See you soon, pal!",
-  "Keep shining, star!"
+  "اجج والعب شتت بكرامه",
+  "نتمنى لك كل التوفيق!",
+  "مع السلامة، انتبه لنفسك!",
+  "إلى اللقاء في وقت آخر!",
+  "رحلة سعيدة يا غالي!",
+  "كل التوفيق لك دائماً!",
+  "نراك قريباً إن شاء الله!",
+  "كان عب وصديق صالح"
 ];
 
 module.exports = {
-  name: "leave",
+  name: "مغادرة",
   handle: async function({ api, event }) {
+    // التأكد أن الحدث هو خروج عضو من المجموعة
+    if (event.logMessageType !== "log:unsubscribe") return;
+    
     const threadID = event.threadID;
     const leftUserID = event.logMessageData.leftParticipantFbId;
 
@@ -37,34 +40,26 @@ module.exports = {
           else resolve(info);
         });
       });
-      const userName = userInfo[leftUserID]?.name || "Unknown User";
-
+      const userName = userInfo[leftUserID]?.name || "مستخدم غير معروف";
       const profilePicUrl = getProfilePictureURL(leftUserID);
 
-      // Select a random short quote
+      // اختيار مقولة عشوائية
       const randomQuote = shortQuotes[Math.floor(Math.random() * shortQuotes.length)];
 
-      // Construct the API URL with the new parameters
+      // بناء رابط الـ API
       const apiUrl = `${GOODBYE_API_URL}?image=${encodeURIComponent(profilePicUrl)}&username=${encodeURIComponent(userName)}&text=${encodeURIComponent(randomQuote)}`;
 
-      // Download the goodbye image
-      const response = await axios.get(apiUrl, { responseType: 'stream', timeout: 10000 });
+      // تحميل الصورة
+      const response = await axios.get(apiUrl, { responseType: 'stream', timeout: 15000 });
 
-      // Verify the content type to ensure it's an image
-      const contentType = response.headers['content-type'];
-      if (!contentType || !contentType.startsWith('image/')) {
-        throw new Error("API response is not an image");
-      }
-
-      // Create a temporary file path for the image
+      // تجهيز المجلد المؤقت
       const tempDir = path.join(__dirname, '..', '..', 'temp');
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
       }
-      const fileName = `goodbye_${crypto.randomBytes(8).toString('hex')}.png`;
+      const fileName = `goodbye_${crypto.randomBytes(4).toString('hex')}.png`;
       const filePath = path.join(tempDir, fileName);
 
-      // Save the image to a temporary file
       const writer = fs.createWriteStream(filePath);
       response.data.pipe(writer);
 
@@ -73,38 +68,22 @@ module.exports = {
         writer.on('error', reject);
       });
 
-      // Check if the file is empty
       const stats = fs.statSync(filePath);
-      if (stats.size === 0) throw new Error("Downloaded goodbye image is empty");
+      if (stats.size === 0) throw new Error("الصورة فارغة");
 
-      // Construct the message
       const msg = {
-        body: `👋 ${userName} has left the group.`,
+        body: `┌  ＮＯＢＡＲＡ • ＬＥＡＶＥ  ┐\n┕━━━━━━━━━━━━━━━┙\n\n👋 للأسف، غادر [ ${userName} ] المجموعة.\n\n『 ${randomQuote} 』\n\n┕  ＤＥＶ BY ＳＩＮＫＯ  ┙`,
         attachment: fs.createReadStream(filePath)
       };
 
-      // Send the message
-      await new Promise((resolve, reject) => {
-        api.sendMessage(msg, threadID, (err) => {
-          if (err) return reject(err);
-          resolve();
-        });
-      });
+      await api.sendMessage(msg, threadID);
 
-      // Delete the temporary file after sending
-      fs.unlinkSync(filePath);
-      console.log(chalk.cyan(`[Leave Event] ${userName} left Thread: ${threadID}`));
+      // حذف الملف المؤقت
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      
+      console.log(chalk.cyan(`[خروج] ${userName} غادر المجموعة: ${threadID}`));
     } catch (error) {
-      api.sendMessage(`⚠️ Failed to send goodbye message.`, threadID);
-      console.log(chalk.red(`[Leave Event Error] ${error.message}`));
-
-      // Ensure the temporary file is deleted even if sending fails
-      const tempDir = path.join(__dirname, '..', '..', 'temp');
-      const fileName = `goodbye_${crypto.randomBytes(8).toString('hex')}.png`;
-      const filePath = path.join(tempDir, fileName);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
+      console.log(chalk.red(`[خطأ في حدث الخروج] ${error.message}`));
     }
   }
 };
