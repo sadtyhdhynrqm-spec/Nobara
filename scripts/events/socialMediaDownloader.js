@@ -5,46 +5,40 @@ const chalk = require('chalk');
 const crypto = require('crypto');
 
 module.exports = {
-  name: "التحميل_التلقائي",
+  name: "socialMediaDownloader",
   handle: async function({ api, event }) {
     const { threadID, messageID, body, senderID } = event;
 
-    // منع البوت من الرد على نفسه أو إذا كانت الرسالة فارغة
+    // منع البوت من الرد على نفسه أو الرسائل الفارغة
     if (senderID === api.getCurrentUserID() || !body) return;
 
-    // استخراج أول رابط يظهر في الرسالة
     const urlMatch = body.match(/(https?:\/\/[^\s]+)/);
     if (!urlMatch) return;
 
     const url = urlMatch[0];
     
-    // التحقق من أن الرابط من المنصات المدعومة لتقليل الضغط على السيرفر
-    const supportedPlatforms = [
-      "facebook.com", "fb.watch", "tiktok.com", 
-      "instagram.com", "youtu.be", "youtube.com", 
-      "twitter.com", "x.com"
-    ];
-
-    if (!supportedPlatforms.some(platform => url.includes(platform))) return;
+    // التحقق من المنصات المدعومة
+    const supported = ["facebook.com", "fb.watch", "tiktok.com", "instagram.com", "youtu.be", "youtube.com", "twitter.com", "x.com"];
+    if (!supported.some(p => url.includes(p))) return;
 
     try {
+      // ⏳ تفاعل الانتظار عند بدء البحث
       api.setMessageReaction("⏳", messageID, () => {}, true);
 
-      // استخدام الـ API المستقر الذي أرسلته (noobs-api.top)
+      // الـ API المستقر والجديد
       const apiEndpoint = `https://noobs-api.top/dipto/alldl?url=${encodeURIComponent(url)}`;
-      
       const response = await axios.get(apiEndpoint, { timeout: 30000 });
-      const videoData = response.data;
+      const data = response.data;
 
-      if (!videoData || !videoData.result) {
-        // إذا لم يجد الرابط لا نفعل شيئاً في الأحداث لعدم إزعاج المستخدم
-        return; 
+      const videoUrl = data.result;
+      const title = data.title || "فيديو";
+
+      if (!videoUrl) {
+        api.setMessageReaction("❌", messageID, () => {}, true);
+        return;
       }
 
-      const videoUrl = videoData.result;
-      const title = videoData.title || "فيديو";
-
-      // إنشاء ملف مؤقت في مجلد الكاش
+      // تجهيز مسار الملف المؤقت
       const fileName = `nobara_${crypto.randomBytes(4).toString('hex')}.mp4`;
       const filePath = path.join(__dirname, '..', '..', fileName);
       const writer = fs.createWriteStream(filePath);
@@ -66,31 +60,30 @@ module.exports = {
       const stats = fs.statSync(filePath);
       const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
 
-      // التأكد من الحجم المسموح في مسنجر (أقل من 85 ميجا)
+      // التأكد من الحجم للمسنجر (85MB)
       if (stats.size > 85 * 1024 * 1024) {
         fs.unlinkSync(filePath);
-        return api.sendMessage(`┌  ＮＯＢＡＲＡ • ＳＩＺＥ  ┐\n┕━━━━━━━━━━━━━━━┙\n\n⚠️ الحجم كبير جداً: ${fileSizeMB} MB\n▸ الحد الأقصى: 85 MB`, threadID, messageID);
+        api.setMessageReaction("❌", messageID, () => {}, true);
+        return api.sendMessage(`┌  ＮＯＢＡＲＡ • ＳＩＺＥ  ┐\n┕━━━━━━━━━━━━━━━┙\n\n⚠️ الحجم كبير جداً: ${fileSizeMB} MB`, threadID, messageID);
       }
 
       const msg = {
-        body: `┌  ＮＯＢＡＲＡ • ＤＯＮＥ  ┐\n┕━━━━━━━━━━━━━━━┙\n\n■ [ مـعـلـومـات الـفـيـديـو ]\n▸ العنوان: ${title.substring(0, 50)}${title.length > 50 ? "..." : ""}\n▸ الحجم: ${fileSizeMB} MB\n\n┌━━━━━━━━━━━━━━━┐\n┕  ＤＥＶ BY ＳＩＮＫＯ  ┙`,
+        body: `┌  ＮＯＢＡＲＡ • ＤＯＮＥ  ┐\n┕━━━━━━━━━━━━━━━┙\n\n■ [ مـعـلـومـات الـفـيـديـو ]\n▸ العنوان: ${title}\n▸ الحجم: ${fileSizeMB} MB\n\n┌━━━━━━━━━━━━━━━┐\n┕  ＤＥＶ BY ＳＩＮＫＯ  ┙`,
         attachment: fs.createReadStream(filePath)
       };
 
       api.sendMessage(msg, threadID, (err) => {
-        if (!err) api.setMessageReaction("✅", messageID, () => {}, true);
-        
-        // حذف الملف بعد الإرسال فوراً لتوفير مساحة Render
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+        if (!err) {
+          // ✅ تفاعل النجاح عند الإرسال
+          api.setMessageReaction("✅", messageID, () => {}, true);
         }
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       }, messageID);
 
-      console.log(chalk.cyan(`[AutoDL] تم الإرسال بواسطة سينكو في المجموعة: ${threadID}`));
-
     } catch (error) {
-      console.log(chalk.red(`[AutoDL Error] ${error.message}`));
-      // في ملف الأحداث يفضل عدم إرسال رسائل خطأ لكل رابط عشان البوت ما يصير مزعج
+      console.log(chalk.red(`[DL Error] ${error.message}`));
+      // ❌ تفاعل الخطأ في حال فشل التحميل
+      api.setMessageReaction("❌", messageID, () => {}, true);
     }
   }
 };
